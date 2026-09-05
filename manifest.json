@@ -1,0 +1,16 @@
+{
+  "name": "FleetCheck — Suivi de maintenance de flotte",
+  "short_name": "FleetCheck",
+  "description": "Suivi de maintenance des véhicules prioritaires (ambulances, SAMU, police, pompiers, armée). Fonctionne 100% hors-ligne.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f2f5f3",
+  "theme_color": "#0b4a3a",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
