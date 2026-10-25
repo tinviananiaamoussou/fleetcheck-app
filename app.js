@@ -8,12 +8,12 @@
 
 const VEHICLE_TYPES = [
   "Ambulance", "SAMU", "SMUR", "Pompiers", "Police", "Armée",
-  "Taxi", "Transport", "Entreprise", "Particulier", "Autre",
+  "Bus universitaire", "Véhicule de service", "Taxi", "Transport", "Entreprise", "Particulier", "Autre",
 ];
 
 const VEHICLE_ICONS = {
   Ambulance: "🚑", SAMU: "🏥", SMUR: "🚨", Pompiers: "🚒", Police: "🚓",
-  Armée: "🪖", Taxi: "🚕", Transport: "🚐", Entreprise: "🏢",
+  Armée: "🪖", "Bus universitaire": "🚌", "Véhicule de service": "🏛️", Taxi: "🚕", Transport: "🚐", Entreprise: "🏢",
   Particulier: "🚗", Autre: "⚙️",
 };
 
@@ -27,11 +27,8 @@ const SEVERITIES = [
 ];
 const SEVERITY_LABEL = { faible: "Faible", surveiller: "À surveiller", critique: "Critique" };
 
-const INTERVALS = { Vidange: 10000, Freins: 30000, Pneus: 40000, Batterie: 60000 };
-const ITEM_ORDER = ["Batterie", "Vidange", "Pneus", "Freins"];
-
 const SCORE_DISCLAIMER =
-  "Ce score est un indicateur calculé à partir des données que vous saisissez. Ce n'est pas un diagnostic mécanique.";
+  "Ce score est un indicateur calculé à partir des données que vous saisissez et de seuils d'entretien indicatifs. Ce n'est pas un diagnostic mécanique.";
 
 /* ---------- IndexedDB ---------- */
 
@@ -140,52 +137,36 @@ const Data = {
     const store = await tx("garages", "readwrite");
     return reqToPromise(store.put({ vehicleId, name, phone }));
   },
+  async updateVehicle(v) {
+    const store = await tx("vehicles", "readwrite");
+    return reqToPromise(store.put(v));
+  },
+  async updateIssue(i) {
+    const store = await tx("issues", "readwrite");
+    return reqToPromise(store.put(i));
+  },
+  // Suppression en cascade dans UNE transaction : tout est supprimé, ou rien.
+  async deleteVehicle(id) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const t = db.transaction(["vehicles", "maintenances", "issues", "garages"], "readwrite");
+      t.oncomplete = () => resolve();
+      t.onerror = () => reject(t.error);
+      t.onabort = () => reject(t.error || new Error("Suppression annulée"));
+      t.objectStore("vehicles").delete(id);
+      t.objectStore("garages").delete(id);
+      for (const name of ["maintenances", "issues"]) {
+        const store = t.objectStore(name);
+        const req = store.index("vehicleId").getAllKeys(id);
+        req.onsuccess = () => req.result.forEach((k) => store.delete(k));
+      }
+    });
+  },
 };
 
 /* ---------- Score ---------- */
 
-function lastOfType(maintenances, type) {
-  return maintenances
-    .filter((m) => m.type === type)
-    .sort((a, b) => (a.mileage > b.mileage ? -1 : 1))[0];
-}
-
-function computeScore(vehicle, maintenances, issues) {
-  let score = 100;
-  const items = ITEM_ORDER.map((label) => {
-    const interval = INTERVALS[label];
-    const last = lastOfType(maintenances, label);
-    const baseKm = last ? last.mileage : (vehicle.initialMileage ?? vehicle.mileage);
-    const dueAtKm = baseKm + interval;
-    const remainingKm = dueAtKm - vehicle.mileage;
-    let status = "ok";
-    if (remainingKm <= 0) status = "depasse";
-    else if (remainingKm <= interval * 0.15) status = "proche";
-    if (status === "proche") score -= 5;
-    if (status === "depasse") score -= 15;
-    return { label, status, remainingKm, dueAtKm, lastDate: last ? last.date : undefined };
-  });
-
-  for (const issue of issues) {
-    if (issue.severity === "surveiller") score -= 10;
-    if (issue.severity === "critique") score -= 30;
-  }
-
-  score = Math.max(0, Math.min(100, score));
-  const level = score >= 80 ? "vert" : score >= 60 ? "jaune" : "rouge";
-  const label =
-    level === "vert" ? "Bon niveau de maintenance" : level === "jaune" ? "À surveiller" : "Maintenance recommandée";
-  const maintenanceState = level === "vert" ? "Bonne" : level === "jaune" ? "À surveiller" : "Recommandée";
-
-  const next = [...items].sort((a, b) => a.remainingKm - b.remainingKm)[0];
-  const nextDueLabel = next
-    ? next.remainingKm <= 0
-      ? `${next.label} — dépassée de ${fmtNum(Math.abs(next.remainingKm))} km`
-      : `${next.label} — dans ${fmtNum(next.remainingKm)} km (à ${fmtNum(next.dueAtKm)} km)`
-    : "—";
-
-  return { score, level, label, maintenanceState, items, nextDueLabel };
-}
+/* Score : voir scoring.js (catégories, seuils, computeScore) */
 
 /* ---------- Utilitaires ---------- */
 
@@ -299,13 +280,22 @@ async function openProfileModal() {
 
 /* ---------- Écrans ---------- */
 
+let dashFilter = "all";
+
 async function renderDashboard(root) {
   const [vehicles, maintenances, issues, profile] = await Promise.all([
     Data.getVehicles(), Data.getAllMaintenances(), Data.getAllIssues(), Data.getProfile(),
   ]);
 
+  const present = CATEGORIES.filter((c) => vehicles.some((v) => categoryOf(v).key === c.key));
+  if (dashFilter !== "all" && !present.some((c) => c.key === dashFilter)) dashFilter = "all";
+  const chipsHTML = present.length < 2 ? "" : `<div class="chip-row" role="tablist">
+      <button class="chip ${dashFilter === "all" ? "active" : ""}" data-filter="all">Tous (${vehicles.length})</button>
+      ${present.map((c) => `<button class="chip ${dashFilter === c.key ? "active" : ""}" data-filter="${c.key}">${c.icon} ${c.label} (${vehicles.filter((v) => categoryOf(v).key === c.key).length})</button>`).join("")}
+    </div>`;
+
   const rows = vehicles
-    .slice()
+    .filter((v) => dashFilter === "all" || categoryOf(v).key === dashFilter)
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
     .map((v) => ({
       vehicle: v,
@@ -320,7 +310,7 @@ async function renderDashboard(root) {
             <span class="vehicle-icon">${VEHICLE_ICONS[v.type] || "⚙️"}</span>
             <span class="vehicle-info">
               <span class="name">${esc(v.brand)} ${esc(v.model)}</span>
-              <span class="meta">${[v.type, v.plate, `${fmtNum(v.mileage)} km`].filter(Boolean).join(" · ")}</span>
+              <span class="meta">${[hasCategory(v) ? `${categoryOf(v).icon} ${categoryOf(v).label}` : "⚠️ Catégorie à définir", v.type, v.plate, `${fmtNum(v.mileage)} km`].filter(Boolean).join(" · ")}</span>
               <span class="label">${esc(s.label)}</span>
             </span>
             <span class="badge-score sm level-${s.level}">${s.score}</span>
@@ -336,6 +326,7 @@ async function renderDashboard(root) {
       })}
       <main class="main">
         ${FleetBackup.bannerHTML(vehicles.length)}
+        ${chipsHTML}
         ${list}
         <p class="disclaimer">${SCORE_DISCLAIMER}</p>
       </main>
@@ -345,44 +336,74 @@ async function renderDashboard(root) {
     </div>
   `;
   qs("#btn-profile").addEventListener("click", openProfileModal);
+  qsa("[data-filter]", root).forEach((b) => b.addEventListener("click", () => { dashFilter = b.dataset.filter; render(); }));
   FleetBackup.bindBanner(root);
 }
 
-function renderNewVehicle(root) {
+function renderNewVehicle(root, existing) {
+  const editing = !!existing;
+  const v = existing || {};
+  const selCat = hasCategory(v) ? v.category : (editing ? "" : DEFAULT_CATEGORY);
   root.innerHTML = `
     <div class="screen">
-      ${shellHTML({ title: "Ajouter un véhicule", subtitle: "Nouvelle fiche", backHref: "#/" })}
+      ${shellHTML({ title: editing ? "Modifier le véhicule" : "Ajouter un véhicule", subtitle: editing ? `${v.brand} ${v.model}` : "Nouvelle fiche", backHref: editing ? `#/vehicule/${v.id}` : "#/" })}
       <main class="main">
         <form class="form-card" id="form-vehicle">
-          <div class="field"><label for="v-type">Type de véhicule</label>
-            <select id="v-type">${VEHICLE_TYPES.map((t) => `<option value="${t}">${VEHICLE_ICONS[t]} ${t}</option>`).join("")}</select>
+          <div class="field"><label for="v-cat">Catégorie du véhicule <span style="font-weight:400;color:var(--muted)">(détermine les seuils d'entretien)</span></label>
+            <select id="v-cat">
+              ${selCat === "" ? `<option value="" selected>— À définir —</option>` : ""}
+              ${CATEGORIES.map((c) => `<option value="${c.key}" ${c.key === selCat ? "selected" : ""}>${c.icon} ${c.label} — ${c.hint}</option>`).join("")}
+            </select>
+          </div>
+          <div class="field"><label for="v-type">Usage / service</label>
+            <select id="v-type">${VEHICLE_TYPES.map((t) => `<option value="${t}" ${t === v.type ? "selected" : ""}>${VEHICLE_ICONS[t]} ${t}</option>`).join("")}</select>
           </div>
           <div class="grid-2">
-            <div class="field"><label for="v-brand">Marque</label><input id="v-brand" required /></div>
-            <div class="field"><label for="v-model">Modèle</label><input id="v-model" required /></div>
-            <div class="field"><label for="v-year">Année</label><input id="v-year" inputmode="numeric" placeholder="2020" /></div>
-            <div class="field"><label for="v-plate">Immatriculation</label><input id="v-plate" placeholder="AB 1234 RB" /></div>
+            <div class="field"><label for="v-brand">Marque</label><input id="v-brand" required value="${esc(v.brand || "")}" /></div>
+            <div class="field"><label for="v-model">Modèle</label><input id="v-model" required value="${esc(v.model || "")}" /></div>
+            <div class="field"><label for="v-year">Année</label><input id="v-year" inputmode="numeric" placeholder="2020" value="${editing ? esc(v.year || "") : ""}" /></div>
+            <div class="field"><label for="v-plate">Immatriculation</label><input id="v-plate" placeholder="AB 1234 RB" value="${esc(v.plate || "")}" /></div>
           </div>
-          <div class="field"><label for="v-mileage">Kilométrage (km)</label><input id="v-mileage" inputmode="numeric" placeholder="120000" /></div>
-          <button type="submit" class="btn block">Enregistrer</button>
+          <div class="field"><label for="v-mileage">Kilométrage (km)</label><input id="v-mileage" inputmode="numeric" placeholder="120000" value="${editing ? esc(v.mileage ?? "") : ""}" /></div>
+          <button type="submit" class="btn block">${editing ? "Enregistrer les modifications" : "Enregistrer"}</button>
         </form>
       </main>
     </div>
   `;
+  if (!editing) {
+    qs("#v-type").addEventListener("change", () => {
+      const k = USAGE_DEFAULT_CATEGORY[qs("#v-type").value];
+      if (k) qs("#v-cat").value = k;
+    });
+  }
   qs("#form-vehicle").addEventListener("submit", async (e) => {
     e.preventDefault();
     const brand = qs("#v-brand").value.trim();
     const model = qs("#v-model").value.trim();
+    const category = qs("#v-cat").value;
+    if (!category) { toast("Choisissez une catégorie", true); return; }
     if (!brand || !model) { toast("Marque et modèle sont obligatoires", true); return; }
     const mileage = Number(qs("#v-mileage").value) || 0;
-    const id = await Data.addVehicle({
-      type: qs("#v-type").value,
-      brand, model,
-      year: Number(qs("#v-year").value) || new Date().getFullYear(),
+    const common = {
+      type: qs("#v-type").value, category, brand, model,
+      year: Number(qs("#v-year").value) || v.year || new Date().getFullYear(),
       plate: qs("#v-plate").value.trim().toUpperCase(),
-      mileage, initialMileage: mileage,
-      createdAt: new Date().toISOString(),
-    });
+      mileage,
+    };
+    if (editing) {
+      const updated = { ...v, ...common };
+      if (mileage < (v.initialMileage ?? mileage)) updated.initialMileage = mileage;
+      let note = "Modifications enregistrées";
+      if (updated.category !== v.category && v.intervals) {
+        delete updated.intervals; // les seuils personnalisés correspondaient à l'ancienne catégorie
+        note = "Enregistré — seuils personnalisés réinitialisés (nouvelle catégorie)";
+      }
+      await Data.updateVehicle(updated);
+      toast(note);
+      location.hash = `#/vehicule/${v.id}`;
+      return;
+    }
+    const id = await Data.addVehicle({ ...common, initialMileage: mileage, createdAt: new Date().toISOString() });
     toast("Véhicule enregistré");
     location.hash = `#/vehicule/${id}`;
   });
@@ -416,6 +437,81 @@ function garageBoxHTML(vehicleId, garage, hasCritical, editing) {
     </div>`;
 }
 
+/* ---------- Modales de la fiche véhicule ---------- */
+
+async function openResolveModal(issue) {
+  const profile = await Data.getProfile();
+  const o = openModal(`
+    <h3>Marquer comme résolue</h3>
+    <p class="desc">${esc(issue.part)} — ${esc(SEVERITY_LABEL[issue.severity])}. L'anomalie reste dans l'historique mais ne pénalise plus le score.</p>
+    <div class="field"><label for="rs-by">Résolue par</label><input id="rs-by" value="${esc(profile?.manager || "")}" placeholder="Nom du mécanicien / responsable" /></div>
+    <div class="field"><label for="rs-note">Réparation effectuée (facultatif)</label><input id="rs-note" placeholder="Ex : plaquettes remplacées" /></div>
+    <button class="btn block" id="rs-ok">Confirmer la résolution</button>
+  `);
+  qs("#rs-ok", o).addEventListener("click", async () => {
+    const by = qs("#rs-by", o).value.trim();
+    if (!by) { toast("Indiquez qui a résolu l'anomalie", true); return; }
+    await Data.updateIssue({ ...issue, resolved: true, resolvedAt: new Date().toISOString(), resolvedBy: by, resolutionNote: qs("#rs-note", o).value.trim() || undefined });
+    o.remove(); toast("Anomalie marquée comme résolue"); render();
+  });
+}
+
+function openIntervalsModal(vehicle) {
+  const cat = categoryOf(vehicle);
+  const eff = getIntervals(vehicle);
+  const defs = defaultIntervals(cat.key);
+  const o = openModal(`
+    <h3>Seuils d'entretien</h3>
+    <p class="desc">Catégorie <strong>${cat.icon} ${cat.label}</strong>. Valeurs de départ <strong>indicatives</strong>, à valider avec un mécanicien ou le carnet du constructeur. L'échéance est atteinte au premier des deux critères (km ou mois).</p>
+    ${ITEM_ORDER.map((l) => `
+      <div class="grid-2">
+        <div class="field"><label for="iv-km-${l}">${l} — tous les (km)</label><input id="iv-km-${l}" inputmode="numeric" value="${eff[l].km}" /></div>
+        <div class="field"><label for="iv-mo-${l}">${l} — ou (mois)</label><input id="iv-mo-${l}" inputmode="numeric" value="${eff[l].months}" /></div>
+      </div>`).join("")}
+    <button class="btn block" id="iv-save">Enregistrer les seuils</button>
+    <button class="btn ghost block" id="iv-reset" style="margin-top:.6rem">Rétablir les valeurs par défaut</button>
+  `);
+  qs("#iv-save", o).addEventListener("click", async () => {
+    const overrides = {};
+    for (const l of ITEM_ORDER) {
+      const km = Number(qs(`#iv-km-${l}`, o).value);
+      const months = Number(qs(`#iv-mo-${l}`, o).value);
+      if (!(km >= 100) || !(months >= 1) || !Number.isFinite(km) || !Number.isFinite(months)) {
+        toast(`${l} : km ≥ 100 et mois ≥ 1 requis`, true); return;
+      }
+      const diff = {};
+      if (km !== defs[l].km) diff.km = Math.round(km);
+      if (months !== defs[l].months) diff.months = Math.round(months);
+      if (Object.keys(diff).length) overrides[l] = diff;
+    }
+    const updated = { ...vehicle };
+    if (Object.keys(overrides).length) updated.intervals = overrides; else delete updated.intervals;
+    await Data.updateVehicle(updated);
+    o.remove(); toast("Seuils enregistrés"); render();
+  });
+  qs("#iv-reset", o).addEventListener("click", async () => {
+    const updated = { ...vehicle }; delete updated.intervals;
+    await Data.updateVehicle(updated);
+    o.remove(); toast("Seuils par défaut rétablis"); render();
+  });
+}
+
+function openDeleteModal(vehicle, nMaint, nIssues) {
+  const o = openModal(`
+    <h3>Supprimer ce véhicule ?</h3>
+    <p class="desc" style="color:var(--bad)"><strong>${esc(vehicle.brand)} ${esc(vehicle.model)}</strong> sera supprimé définitivement avec ses <strong>${nMaint} entretien(s)</strong>, ses <strong>${nIssues} anomalie(s)</strong> (photos comprises) et son contact garage. Cette action est irréversible : pensez à enregistrer une sauvegarde avant (⚙️ → Sauvegarde des données).</p>
+    <button class="btn destructive block" id="dl-ok">Supprimer définitivement</button>
+    <button class="btn ghost block" id="dl-cancel" style="margin-top:.6rem">Annuler</button>
+  `);
+  qs("#dl-cancel", o).addEventListener("click", () => o.remove());
+  qs("#dl-ok", o).addEventListener("click", async () => {
+    try {
+      await Data.deleteVehicle(vehicle.id);
+      o.remove(); toast("Véhicule supprimé"); location.hash = "#/";
+    } catch (err) { toast("Suppression impossible : " + err.message, true); }
+  });
+}
+
 const garageEditing = new Set();
 
 async function renderVehicleDetail(root, id) {
@@ -434,14 +530,17 @@ async function renderVehicleDetail(root, id) {
 
   const s = computeScore(vehicle, maintenances, issues);
   const sortedM = [...maintenances].sort((a, b) => (a.date < b.date ? 1 : -1));
-  const sortedI = [...issues].sort((a, b) => (a.date < b.date ? 1 : -1));
-  const hasCritical = issues.some((i) => i.severity === "critique");
+  const sortedI = [...issues].sort((a, b) => (!!a.resolved !== !!b.resolved ? (a.resolved ? 1 : -1) : (a.date < b.date ? 1 : -1)));
+  const cat = categoryOf(vehicle);
+  const hasCritical = issues.some((i) => !i.resolved && i.severity === "critique");
 
   const itemsHTML = s.items.map((item) => `
     <div class="item-card">
       <div class="row"><span class="dot ${item.status}"></span><span>${item.label}</span></div>
-      <p>${item.status === "depasse" ? `Dépassé de ${fmtNum(Math.abs(item.remainingKm))} km` : `Dans ${fmtNum(item.remainingKm)} km`}</p>
-      <p>${item.lastDate ? `Dernier : ${fmtDate(item.lastDate)}` : "Jamais renseigné"}</p>
+      <p>${describeItem(item).kmText}</p>
+      <p>${describeItem(item).timeText}</p>
+      <p>${item.lastDate ? `Dernier : ${fmtDate(item.lastDate)}` : "Jamais renseigné (calculé depuis l'ajout du véhicule)"}</p>
+      <p>Seuil : ${fmtNum(item.interval.km)} km / ${item.interval.months} mois</p>
     </div>`).join("");
 
   const maintHTML = sortedM.length === 0
@@ -457,23 +556,28 @@ async function renderVehicleDetail(root, id) {
   const issuesHTML = sortedI.length === 0
     ? `<p style="color:var(--muted);font-size:0.9rem">Aucune anomalie signalée.</p>`
     : `<ul class="history-list">${sortedI.map((i) => `
-        <li class="history-item">
-          <div class="top"><span class="title">${i.part}</span><span class="severity-badge ${i.severity}">${SEVERITY_LABEL[i.severity]}</span></div>
+        <li class="history-item ${i.resolved ? "resolved" : ""}">
+          <div class="top"><span class="title">${i.part}</span>${i.resolved ? `<span class="resolved-badge">✅ Résolue</span>` : `<span class="severity-badge ${i.severity}">${SEVERITY_LABEL[i.severity]}</span>`}</div>
           <p class="meta">${fmtDate(i.date)}</p>
           ${i.description ? `<p class="note">${esc(i.description)}</p>` : ""}
           ${i.responsible ? `<p class="responsible">Par ${esc(i.responsible)}</p>` : ""}
           ${i.photo ? `<img class="thumb" src="${i.photo}" data-action="zoom" alt="Photo de l'anomalie" />` : ""}
+          ${i.resolved
+            ? `<p class="responsible">Résolue le ${fmtDate(i.resolvedAt)}${i.resolvedBy ? ` par ${esc(i.resolvedBy)}` : ""}${i.resolutionNote ? ` — ${esc(i.resolutionNote)}` : ""}</p>`
+            : `<button class="btn secondary small" data-action="resolve" data-id="${i.id}" style="margin-top:.6rem">✅ Marquer comme résolue</button>`}
         </li>`).join("")}</ul>`;
 
   root.innerHTML = `
     <div class="screen">
-      ${shellHTML({ title: `${esc(vehicle.brand)} ${esc(vehicle.model)}`, subtitle: `${vehicle.type} · ${vehicle.plate || "sans plaque"}`, backHref: "#/" })}
+      ${shellHTML({ title: `${esc(vehicle.brand)} ${esc(vehicle.model)}`, subtitle: `${cat.label} · ${vehicle.type} · ${vehicle.plate || "sans plaque"}`, backHref: "#/" })}
       <main class="main">
+        ${hasCategory(vehicle) ? "" : `<a class="notice" href="#/modifier/${id}">⚠️ <span><strong>Catégorie non définie.</strong> Les seuils « Léger » sont appliqués par défaut. Touchez ici pour choisir la bonne catégorie.</span></a>`}
         <section class="card">
           <div class="vehicle-head">
             <div>
               <h2>${VEHICLE_ICONS[vehicle.type] || ""} ${esc(vehicle.brand)} ${esc(vehicle.model)}</h2>
               <p class="sub">${vehicle.year} · ${fmtNum(vehicle.mileage)} km</p>
+              <p class="sub">${cat.icon} ${cat.label}${hasCategory(vehicle) ? "" : " (par défaut)"} · ${vehicle.type}</p>
               <p class="status-label">${s.label}</p>
             </div>
             <span class="badge-score lg level-${s.level}">${s.score}</span>
@@ -486,6 +590,10 @@ async function renderVehicleDetail(root, id) {
 
         <section class="item-grid">${itemsHTML}</section>
 
+        <div class="action-row">
+          <a class="btn ghost" href="#/modifier/${id}">✏️ Modifier</a>
+          <button class="btn ghost" data-action="intervals">⚙️ Seuils</button>
+        </div>
         <div class="mission-btn-wrap">
           <a class="btn secondary block" href="#/mission/${id}">📄 Générer une déclaration de mission</a>
         </div>
@@ -499,6 +607,9 @@ async function renderVehicleDetail(root, id) {
         <h3 class="section-title">Garage / mécanicien</h3>
         ${garageBoxHTML(id, garage, hasCritical, garageEditing.has(id))}
 
+        <h3 class="section-title">Zone sensible</h3>
+        <button class="btn ghost block danger-link" data-action="delete-vehicle">🗑️ Supprimer ce véhicule</button>
+
         <p class="disclaimer">${SCORE_DISCLAIMER}</p>
       </main>
       <div class="bottom-bar"><div class="bottom-bar-inner cols-2">
@@ -511,6 +622,12 @@ async function renderVehicleDetail(root, id) {
   qsa('[data-action="zoom"]').forEach((img) => img.addEventListener("click", () => openLightbox(img.src)));
   const editBtn = qs('[data-action="edit-garage"]');
   if (editBtn) editBtn.addEventListener("click", () => { garageEditing.add(id); render(); });
+  qsa('[data-action="resolve"]').forEach((b) => b.addEventListener("click", () => {
+    const issue = issues.find((x) => x.id === Number(b.dataset.id));
+    if (issue) openResolveModal(issue);
+  }));
+  qs('[data-action="intervals"]').addEventListener("click", () => openIntervalsModal(vehicle));
+  qs('[data-action="delete-vehicle"]').addEventListener("click", () => openDeleteModal(vehicle, maintenances.length, issues.length));
   const garageForm = qs("#form-garage");
   if (garageForm) {
     garageForm.addEventListener("submit", async (e) => {
@@ -674,9 +791,10 @@ async function renderMissionReport(root, vehicleId, respFromQuery) {
 
   const s = computeScore(vehicle, maintenances, issues);
   const now = new Date();
-  const issuesHTML = issues.length === 0
-    ? `<p class="issue-line">Aucune anomalie signalée.</p>`
-    : issues.map((i) => `<p class="issue-line">${i.part} — ${SEVERITY_LABEL[i.severity]} — ${fmtDate(i.date)}${i.responsible ? ` — par ${esc(i.responsible)}` : ""}${i.description ? `<br/><span style="color:var(--muted)">${esc(i.description)}</span>` : ""}</p>`).join("");
+  const openList = issues.filter((i) => !i.resolved);
+  const issuesHTML = openList.length === 0
+    ? `<p class="issue-line">Aucune anomalie non résolue.</p>`
+    : openList.map((i) => `<p class="issue-line">${i.part} — ${SEVERITY_LABEL[i.severity]} — ${fmtDate(i.date)}${i.responsible ? ` — par ${esc(i.responsible)}` : ""}${i.description ? `<br/><span style="color:var(--muted)">${esc(i.description)}</span>` : ""}</p>`).join("");
 
   root.innerHTML = `
     <div class="report-page">
@@ -686,7 +804,8 @@ async function renderMissionReport(root, vehicleId, respFromQuery) {
         <p class="stamp">État du véhicule au ${now.toLocaleString("fr-FR")}${profile?.organisation ? ` · ${esc(profile.organisation)}` : ""}</p>
 
         <h2>Véhicule</h2>
-        <div class="row"><span>Type</span><span>${vehicle.type}</span></div>
+        <div class="row"><span>Catégorie</span><span>${categoryOf(vehicle).label}${hasCategory(vehicle) ? "" : " (par défaut)"}</span></div>
+        <div class="row"><span>Usage / service</span><span>${vehicle.type}</span></div>
         <div class="row"><span>Marque / modèle</span><span>${esc(vehicle.brand)} ${esc(vehicle.model)}</span></div>
         <div class="row"><span>Année</span><span>${vehicle.year}</span></div>
         <div class="row"><span>Immatriculation</span><span>${esc(vehicle.plate) || "—"}</span></div>
@@ -738,6 +857,10 @@ async function render() {
       renderNewVehicle(root);
     } else if (segments[0] === "vehicule" && segments[1]) {
       await renderVehicleDetail(root, Number(segments[1]));
+    } else if (segments[0] === "modifier" && segments[1]) {
+      const vv = await Data.getVehicle(Number(segments[1]));
+      if (!vv) { location.hash = "#/"; return; }
+      renderNewVehicle(root, vv);
     } else if (segments[0] === "entretien" && segments[1]) {
       renderNewMaintenance(root, Number(segments[1]));
     } else if (segments[0] === "anomalie" && segments[1]) {

@@ -81,6 +81,7 @@ fleetcheck/
 ├── style.css          identité visuelle
 ├── app.js              toute la logique (données, score, écrans)
 ├── backup.js           sauvegarde / restauration (fichier .json)
+├── scoring.js          catégories de véhicules, seuils d'entretien, calcul du score
 ├── manifest.json      configuration de l'installation PWA
 ├── sw.js                 service worker (cache hors-ligne)
 └── icons/                 icônes de l'application
@@ -93,3 +94,30 @@ fleetcheck/
   flotte sur son appareil.
 - Le score est un indicateur transparent basé sur les données saisies, pas un
   diagnostic mécanique.
+
+
+## Catégories de véhicules et score
+
+Chaque véhicule a deux attributs distincts :
+
+- **Catégorie** (gabarit) : léger, utilitaire, minibus, bus / autocar, poids
+  lourd, deux-roues. Elle détermine les **seuils d'entretien** appliqués.
+- **Usage / service** : ambulance, SAMU, police, bus universitaire, véhicule
+  de service… Les usages prioritaires (ambulance, SAMU, SMUR, pompiers,
+  police, armée) déclenchent l'alerte « proche » plus tôt (25 % de l'intervalle
+  restant au lieu de 15 %).
+
+Pour chaque élément (batterie, vidange, pneus, freins), l'échéance est atteinte
+**au premier des deux critères : kilométrage ou délai en mois**. Seules les
+anomalies **non résolues** pénalisent le score ; une anomalie résolue reste
+dans l'historique (auteur, date, note de réparation).
+
+⚠️ **Les seuils par catégorie (`DEFAULT_INTERVALS` dans `scoring.js`) sont des
+valeurs de départ indicatives**, ni réglementaires ni constructeur. À valider
+avec un mécanicien ou le carnet du constructeur, puis à ajuster véhicule par
+véhicule (fiche → ⚙️ Seuils). Les engins à heures de fonctionnement (chantier,
+agricole) ne sont pas couverts.
+
+Les véhicules créés avant l'introduction des catégories n'ont pas de catégorie :
+ils sont évalués comme « Léger » et signalés « Catégorie à définir » jusqu'à ce
+qu'on les modifie (✏️ Modifier).
