@@ -18,7 +18,7 @@ const VEHICLE_ICONS = {
 };
 
 const MAINTENANCE_TYPES = ["Vidange", "Freins", "Pneus", "Batterie", "Autre"];
-const ISSUE_PARTS = ["Freins", "Pneus", "Batterie", "Moteur", "Carrosserie", "Autre"];
+const ISSUE_PARTS = ["Freins", "Pneus", "Batterie", "Moteur", "Carrosserie", "Éclairage", "Direction", "Équipement de sécurité", "Autre"];
 
 const SEVERITIES = [
   { value: "faible", label: "🟢 Faible" },
@@ -33,7 +33,7 @@ const SCORE_DISCLAIMER =
 /* ---------- IndexedDB ---------- */
 
 const DB_NAME = "fleetcheck";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 let dbPromise = null;
 
 function openDB() {
@@ -59,8 +59,21 @@ function openDB() {
       if (!db.objectStoreNames.contains("garages")) {
         db.createObjectStore("garages", { keyPath: "vehicleId" });
       }
+      if (!db.objectStoreNames.contains("documents")) {
+        const s = db.createObjectStore("documents", { keyPath: "id", autoIncrement: true });
+        s.createIndex("vehicleId", "vehicleId");
+      }
+      if (!db.objectStoreNames.contains("inspections")) {
+        const s = db.createObjectStore("inspections", { keyPath: "id", autoIncrement: true });
+        s.createIndex("vehicleId", "vehicleId");
+      }
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      const db = req.result;
+      // Si un autre onglet doit mettre la base à niveau, on se ferme pour ne pas le bloquer.
+      db.onversionchange = () => { db.close(); dbPromise = null; };
+      resolve(db);
+    };
     req.onerror = () => reject(req.error);
   });
   return dbPromise;
@@ -137,6 +150,48 @@ const Data = {
     const store = await tx("garages", "readwrite");
     return reqToPromise(store.put({ vehicleId, name, phone }));
   },
+  async getDocuments(vehicleId) {
+    const store = await tx("documents", "readonly");
+    return reqToPromise(store.index("vehicleId").getAll(vehicleId));
+  },
+  async getAllDocuments() {
+    const store = await tx("documents", "readonly");
+    return reqToPromise(store.getAll());
+  },
+  async addDocument(d) {
+    const store = await tx("documents", "readwrite");
+    return reqToPromise(store.add(d));
+  },
+  async updateDocument(d) {
+    const store = await tx("documents", "readwrite");
+    return reqToPromise(store.put(d));
+  },
+  async deleteDocument(id) {
+    const store = await tx("documents", "readwrite");
+    return reqToPromise(store.delete(id));
+  },
+  async getInspections(vehicleId) {
+    const store = await tx("inspections", "readonly");
+    return reqToPromise(store.index("vehicleId").getAll(vehicleId));
+  },
+  // Inspection + anomalies générées + kilométrage : UNE transaction (tout ou rien).
+  async saveInspection(inspection, newIssues, vehicleId, mileage) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const t = db.transaction(["inspections", "issues", "vehicles"], "readwrite");
+      t.oncomplete = () => resolve();
+      t.onerror = () => reject(t.error);
+      t.onabort = () => reject(t.error || new Error("Enregistrement annulé"));
+      t.objectStore("inspections").add(inspection);
+      const issues = t.objectStore("issues");
+      newIssues.forEach((i) => issues.add(i));
+      if (mileage != null) {
+        const vs = t.objectStore("vehicles");
+        const r = vs.get(vehicleId);
+        r.onsuccess = () => { const v = r.result; if (v && mileage > v.mileage) { v.mileage = mileage; vs.put(v); } };
+      }
+    });
+  },
   async updateVehicle(v) {
     const store = await tx("vehicles", "readwrite");
     return reqToPromise(store.put(v));
@@ -149,13 +204,13 @@ const Data = {
   async deleteVehicle(id) {
     const db = await openDB();
     return new Promise((resolve, reject) => {
-      const t = db.transaction(["vehicles", "maintenances", "issues", "garages"], "readwrite");
+      const t = db.transaction(["vehicles", "maintenances", "issues", "garages", "documents", "inspections"], "readwrite");
       t.oncomplete = () => resolve();
       t.onerror = () => reject(t.error);
       t.onabort = () => reject(t.error || new Error("Suppression annulée"));
       t.objectStore("vehicles").delete(id);
       t.objectStore("garages").delete(id);
-      for (const name of ["maintenances", "issues"]) {
+      for (const name of ["maintenances", "issues", "documents", "inspections"]) {
         const store = t.objectStore(name);
         const req = store.index("vehicleId").getAllKeys(id);
         req.onsuccess = () => req.result.forEach((k) => store.delete(k));
@@ -283,9 +338,11 @@ async function openProfileModal() {
 let dashFilter = "all";
 
 async function renderDashboard(root) {
-  const [vehicles, maintenances, issues, profile] = await Promise.all([
-    Data.getVehicles(), Data.getAllMaintenances(), Data.getAllIssues(), Data.getProfile(),
+  const [vehicles, maintenances, issues, profile, allDocs] = await Promise.all([
+    Data.getVehicles(), Data.getAllMaintenances(), Data.getAllIssues(), Data.getProfile(), Data.getAllDocuments(),
   ]);
+  const liveIds = new Set(vehicles.map((v) => v.id));
+  const docs = allDocs.filter((d) => liveIds.has(d.vehicleId));
 
   const present = CATEGORIES.filter((c) => vehicles.some((v) => categoryOf(v).key === c.key));
   if (dashFilter !== "all" && !present.some((c) => c.key === dashFilter)) dashFilter = "all";
@@ -311,7 +368,7 @@ async function renderDashboard(root) {
             <span class="vehicle-info">
               <span class="name">${esc(v.brand)} ${esc(v.model)}</span>
               <span class="meta">${[hasCategory(v) ? `${categoryOf(v).icon} ${categoryOf(v).label}` : "⚠️ Catégorie à définir", v.type, v.plate, `${fmtNum(v.mileage)} km`].filter(Boolean).join(" · ")}</span>
-              <span class="label">${esc(s.label)}</span>
+              <span class="label">${esc(s.label)}${docRowTag(docs.filter((d) => d.vehicleId === v.id)) ? ` · ${docRowTag(docs.filter((d) => d.vehicleId === v.id))}` : ""}</span>
             </span>
             <span class="badge-score sm level-${s.level}">${s.score}</span>
           </a>
@@ -326,6 +383,7 @@ async function renderDashboard(root) {
       })}
       <main class="main">
         ${FleetBackup.bannerHTML(vehicles.length)}
+        ${docsAlertHTML(docs)}
         ${chipsHTML}
         ${list}
         <p class="disclaimer">${SCORE_DISCLAIMER}</p>
@@ -515,8 +573,8 @@ function openDeleteModal(vehicle, nMaint, nIssues) {
 const garageEditing = new Set();
 
 async function renderVehicleDetail(root, id) {
-  const [vehicle, maintenances, issues, garage] = await Promise.all([
-    Data.getVehicle(id), Data.getMaintenances(id), Data.getIssues(id), Data.getGarage(id),
+  const [vehicle, maintenances, issues, garage, documents, inspections] = await Promise.all([
+    Data.getVehicle(id), Data.getMaintenances(id), Data.getIssues(id), Data.getGarage(id), Data.getDocuments(id), Data.getInspections(id),
   ]);
 
   if (!vehicle) {
@@ -595,8 +653,13 @@ async function renderVehicleDetail(root, id) {
           <button class="btn ghost" data-action="intervals">⚙️ Seuils</button>
         </div>
         <div class="mission-btn-wrap">
+          <a class="btn block" href="#/inspection/${id}" style="margin-bottom:.6rem">🔍 Inspection avant départ</a>
           <a class="btn secondary block" href="#/mission/${id}">📄 Générer une déclaration de mission</a>
         </div>
+
+        ${inspectionsSectionHTML(inspections)}
+
+        ${docsSectionHTML(documents)}
 
         <h3 class="section-title">Historique des entretiens</h3>
         ${maintHTML}
@@ -627,6 +690,7 @@ async function renderVehicleDetail(root, id) {
     if (issue) openResolveModal(issue);
   }));
   qs('[data-action="intervals"]').addEventListener("click", () => openIntervalsModal(vehicle));
+  bindDocs(vehicle, documents, root);
   qs('[data-action="delete-vehicle"]').addEventListener("click", () => openDeleteModal(vehicle, maintenances.length, issues.length));
   const garageForm = qs("#form-garage");
   if (garageForm) {
@@ -758,8 +822,8 @@ function renderNewIssue(root, vehicleId) {
 }
 
 async function renderMissionReport(root, vehicleId, respFromQuery) {
-  const [vehicle, maintenances, issues, profile] = await Promise.all([
-    Data.getVehicle(vehicleId), Data.getMaintenances(vehicleId), Data.getIssues(vehicleId), Data.getProfile(),
+  const [vehicle, maintenances, issues, profile, documents, inspections] = await Promise.all([
+    Data.getVehicle(vehicleId), Data.getMaintenances(vehicleId), Data.getIssues(vehicleId), Data.getProfile(), Data.getDocuments(vehicleId), Data.getInspections(vehicleId),
   ]);
 
   if (!vehicle) {
@@ -819,6 +883,12 @@ async function renderMissionReport(root, vehicleId, respFromQuery) {
         <h2>Anomalies non résolues</h2>
         ${issuesHTML}
 
+        <h2>Inspection avant départ</h2>
+        ${inspectionReportHTML(inspections)}
+
+        <h2>Documents administratifs</h2>
+        ${docsReportHTML(documents)}
+
         <div class="sig">
           <h2>Responsable signataire</h2>
           <p style="margin:0.3rem 0 0">${esc(respFromQuery)}</p>
@@ -865,6 +935,10 @@ async function render() {
       renderNewMaintenance(root, Number(segments[1]));
     } else if (segments[0] === "anomalie" && segments[1]) {
       renderNewIssue(root, Number(segments[1]));
+    } else if (segments[0] === "inspection" && segments[1]) {
+      await renderInspection(root, Number(segments[1]));
+    } else if (segments[0] === "echeances") {
+      await renderEcheances(root);
     } else if (segments[0] === "mission" && segments[1]) {
       await renderMissionReport(root, Number(segments[1]), params.get("resp"));
     } else {

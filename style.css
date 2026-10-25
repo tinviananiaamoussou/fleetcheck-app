@@ -363,3 +363,32 @@ a { color: inherit; text-decoration: none; }
 .history-item.resolved { opacity: .72; background: var(--surface); }
 .resolved-badge { font-size: .74rem; font-weight: 700; color: var(--good); white-space: nowrap; }
 .modal-sheet .grid-2 .field label { font-size: .78rem; }
+
+/* ---------- Documents et échéances (Lot 2) ---------- */
+.doc-item { padding: 0; }
+.doc-edit { display: block; width: 100%; text-align: left; background: none; border: 0; padding: .75rem; color: inherit; font: inherit; cursor: pointer; }
+.doc-chip { font-size: .72rem; font-weight: 700; border-radius: 999px; padding: .15rem .55rem; white-space: nowrap; align-self: flex-start; }
+.doc-chip.valide { background: #e3f4ea; color: #146c43; }
+.doc-chip.bientot { background: #fff1cf; color: #8a5a00; }
+.doc-chip.urgent { background: #ffe0cc; color: #a34100; }
+.doc-chip.expire, .doc-chip.inconnu { background: #fbdada; color: #a12a2a; }
+.doc-txt.expire, .doc-txt.urgent { color: var(--bad); font-weight: 700; }
+.doc-alert.expire { background: #fdeaea; border-color: #e4b5b5; }
+.doc-alert { text-decoration: none; }
+
+/* ---------- Inspection avant départ (Lot 3) ---------- */
+.insp-list { margin-top: .9rem; }
+.insp-row { display: grid; gap: .55rem; }
+.insp-row.is-bad { border-color: #e4b5b5; background: #fff6f6; }
+.insp-label { font-weight: 600; font-size: .92rem; line-height: 1.3; }
+.insp-crit { font-size: .66rem; font-weight: 700; color: var(--bad); border: 1px solid #e4b5b5; border-radius: 999px; padding: .05rem .4rem; margin-left: .3rem; vertical-align: middle; }
+.insp-btns { display: grid; grid-template-columns: 1fr 1fr .7fr; gap: .45rem; }
+.insp-btn { border: 1px solid var(--border); background: var(--card); color: var(--fg); border-radius: var(--radius-sm); padding: .6rem 0; font-weight: 700; font-size: .9rem; cursor: pointer; }
+.insp-btn.ok.sel { background: #1e8e5a; border-color: #1e8e5a; color: #fff; }
+.insp-btn.bad.sel { background: #c23b3b; border-color: #c23b3b; color: #fff; }
+.insp-btn.na.sel { background: #6b7385; border-color: #6b7385; color: #fff; }
+.insp-note { width: 100%; padding: .55rem .6rem; border: 1px solid var(--border); border-radius: var(--radius-sm); font: inherit; font-size: .85rem; }
+.insp-badge { font-size: .72rem; font-weight: 700; text-align: right; }
+.insp-badge.apte { color: #146c43; }
+.insp-badge.defauts { color: #8a5a00; }
+.insp-badge.bloquant { color: #a12a2a; }

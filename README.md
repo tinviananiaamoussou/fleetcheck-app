@@ -82,6 +82,8 @@ fleetcheck/
 ├── app.js              toute la logique (données, score, écrans)
 ├── backup.js           sauvegarde / restauration (fichier .json)
 ├── scoring.js          catégories de véhicules, seuils d'entretien, calcul du score
+├── documents.js        documents administratifs et échéances
+├── inspection.js       inspection avant départ (check-lists par catégorie)
 ├── manifest.json      configuration de l'installation PWA
 ├── sw.js                 service worker (cache hors-ligne)
 └── icons/                 icônes de l'application
@@ -121,3 +123,38 @@ agricole) ne sont pas couverts.
 Les véhicules créés avant l'introduction des catégories n'ont pas de catégorie :
 ils sont évalués comme « Léger » et signalés « Catégorie à définir » jusqu'à ce
 qu'on les modifie (✏️ Modifier).
+
+
+## Documents et échéances
+
+Chaque véhicule peut suivre des documents (assurance, visite technique, carte
+grise, permis du chauffeur, autorisation de transport, ou tout autre document
+nommé librement) avec leur date d'expiration. **FleetCheck ne fixe aucune
+obligation légale** : c'est vous qui choisissez quoi suivre.
+
+- Statuts : *valide*, *à renouveler* (≤ 30 jours), *urgent* (≤ 7 jours),
+  *expiré*. Un document reste valable le jour de sa date d'expiration.
+- Le tableau de bord affiche un bandeau et une étiquette par véhicule ;
+  l'écran **Échéances** (`#/echeances`) liste tout ce qui expire ou a expiré.
+- La déclaration de mission reprend les documents et avertit en cas
+  d'expiration.
+
+## Inspection avant départ
+
+Liste de contrôle en un tap (OK / Défaut / N/A), adaptée à la catégorie et à
+l'usage (ex. issues de secours pour un bus, attelage pour un poids lourd,
+gyrophare pour un véhicule prioritaire).
+
+- Chaque **défaut** crée automatiquement une anomalie (« critique » pour un
+  point critique, « à surveiller » sinon), sans doublon tant qu'une anomalie
+  ouverte existe pour le même point. Le score et la déclaration de mission en
+  tiennent compte.
+- Un défaut sur un point **critique** donne le résultat « Défaut bloquant :
+  départ déconseillé ». Les points critiques sont un choix de départ du
+  prototype, **pas une norme** : adaptez la liste à vos procédures et à la
+  réglementation (`checklistFor` dans `inspection.js`).
+- Le kilométrage saisi met à jour le véhicule (jamais à la baisse). La
+  déclaration de mission signale une inspection de plus de 24 h ou absente.
+
+Base de données : passage de la version 1 à 2 (ajout des magasins `documents`
+et `inspections`), automatique et sans perte pour les données existantes.
