@@ -324,3 +324,22 @@ a { color: inherit; text-decoration: none; }
   .report-doc { padding: 0; max-width: none; }
   body { background: #fff; }
 }
+
+/* ---------- Sauvegarde des données ---------- */
+.backup-banner {
+  display: flex; gap: .6rem; align-items: flex-start; width: 100%;
+  text-align: left; cursor: pointer;
+  background: #fff8e1; color: var(--fg);
+  border: 1px solid #ecd48a; border-radius: var(--radius-sm);
+  padding: .7rem .8rem; margin-bottom: .9rem;
+  font-size: .85rem; line-height: 1.35;
+}
+.backup-banner:active { opacity: .85; }
+.backup-status {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: .6rem .8rem; margin-bottom: 1rem;
+  display: grid; gap: .4rem; font-size: .85rem;
+}
+.backup-status div { display: flex; justify-content: space-between; gap: .8rem; }
+.backup-status span { color: var(--muted); }
+.backup-status strong { text-align: right; }

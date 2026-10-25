@@ -1,9 +1,10 @@
-const CACHE_NAME = "fleetcheck-v1";
+const CACHE_NAME = "fleetcheck-v2";
 const ASSETS = [
   "./",
   "./index.html",
   "./style.css",
   "./app.js",
+  "./backup.js",
   "./manifest.json",
   "./icon-192.png",
   "./icon-512.png",

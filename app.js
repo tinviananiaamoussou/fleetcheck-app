@@ -285,7 +285,9 @@ async function openProfileModal() {
     <div class="field"><label for="pf-mgr">Responsable de flotte</label>
       <input id="pf-mgr" value="${esc(profile?.manager || "")}" placeholder="Ex : Anania" /></div>
     <button class="btn block" id="pf-save">Enregistrer</button>
+    <button class="btn ghost block" id="pf-backup" style="margin-top:.6rem">💾 Sauvegarde des données</button>
   `);
+  qs("#pf-backup", overlay).addEventListener("click", () => { overlay.remove(); FleetBackup.openPanel(); });
   qs("#pf-save", overlay).addEventListener("click", async () => {
     const org = qs("#pf-org", overlay).value.trim();
     const mgr = qs("#pf-mgr", overlay).value.trim();
@@ -333,6 +335,7 @@ async function renderDashboard(root) {
         action: `<button class="header-action" id="btn-profile" aria-label="Profil">⚙️</button>`,
       })}
       <main class="main">
+        ${FleetBackup.bannerHTML(vehicles.length)}
         ${list}
         <p class="disclaimer">${SCORE_DISCLAIMER}</p>
       </main>
@@ -342,6 +345,7 @@ async function renderDashboard(root) {
     </div>
   `;
   qs("#btn-profile").addEventListener("click", openProfileModal);
+  FleetBackup.bindBanner(root);
 }
 
 function renderNewVehicle(root) {

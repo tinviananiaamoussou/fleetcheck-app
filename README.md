@@ -8,6 +8,28 @@ distante, pas de Firebase, pas de Kodular. Toutes les données restent sur
 l'appareil de l'utilisateur (stockées dans IndexedDB, le stockage local du
 navigateur).
 
+## Sauvegarde (indépendante du navigateur)
+
+IndexedDB est un stockage **du navigateur** : « Effacer les données de
+navigation » dans Chrome (ou désinstaller l'application) supprime tout, sans
+retour possible. Pour s'en protéger :
+
+- ⚙️ → **Sauvegarde des données** → *Enregistrer une sauvegarde* : crée un
+  fichier `FleetCheck-sauvegarde-AAAA-MM-JJ.json` (véhicules, entretiens,
+  anomalies avec photos, garages, profil). À conserver hors du navigateur
+  (Téléchargements, Google Drive, WhatsApp à soi-même).
+- ⚙️ → **Sauvegarde des données** → *Restaurer depuis un fichier* : recharge
+  une sauvegarde sur n'importe quel appareil ou navigateur. La restauration
+  **remplace** les données actuelles ; elle est atomique (en cas d'erreur,
+  rien n'est modifié).
+- Un bandeau de rappel s'affiche sur le tableau de bord si aucune sauvegarde
+  n'a été faite depuis plus de 7 jours.
+- L'application demande aussi au navigateur de protéger le stockage contre les
+  purges automatiques (sans effet sur un effacement manuel).
+
+Le code est dans `backup.js` : il sauvegarde tous les magasins de la base
+« fleetcheck » de façon générique.
+
 ## Fonctionnalités
 
 - Tableau de bord de la flotte avec score de maintenance par véhicule (🟢🟡🔴)
@@ -58,6 +80,7 @@ fleetcheck/
 ├── index.html        page unique de l'application
 ├── style.css          identité visuelle
 ├── app.js              toute la logique (données, score, écrans)
+├── backup.js           sauvegarde / restauration (fichier .json)
 ├── manifest.json      configuration de l'installation PWA
 ├── sw.js                 service worker (cache hors-ligne)
 └── icons/                 icônes de l'application
