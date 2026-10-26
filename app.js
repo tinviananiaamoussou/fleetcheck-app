@@ -33,7 +33,7 @@ const SCORE_DISCLAIMER =
 /* ---------- IndexedDB ---------- */
 
 const DB_NAME = "fleetcheck";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 let dbPromise = null;
 
 function openDB() {
@@ -61,6 +61,14 @@ function openDB() {
       }
       if (!db.objectStoreNames.contains("documents")) {
         const s = db.createObjectStore("documents", { keyPath: "id", autoIncrement: true });
+        s.createIndex("vehicleId", "vehicleId");
+      }
+      if (!db.objectStoreNames.contains("fuel")) {
+        const s = db.createObjectStore("fuel", { keyPath: "id", autoIncrement: true });
+        s.createIndex("vehicleId", "vehicleId");
+      }
+      if (!db.objectStoreNames.contains("docphotos")) {
+        const s = db.createObjectStore("docphotos", { keyPath: "docId" });
         s.createIndex("vehicleId", "vehicleId");
       }
       if (!db.objectStoreNames.contains("inspections")) {
@@ -166,8 +174,72 @@ const Data = {
     const store = await tx("documents", "readwrite");
     return reqToPromise(store.put(d));
   },
+  // Document + photo dans UNE transaction. photoAction : { set: dataUrl } | { remove: true } | null.
+  async saveDocument(rec, photoAction) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const t = db.transaction(["documents", "docphotos"], "readwrite");
+      t.oncomplete = () => resolve();
+      t.onerror = () => reject(t.error);
+      t.onabort = () => reject(t.error || new Error("Enregistrement annulé"));
+      const ds = t.objectStore("documents");
+      const apply = (id) => {
+        if (!photoAction) return;
+        const ps = t.objectStore("docphotos");
+        if (photoAction.set) ps.put({ docId: id, vehicleId: rec.vehicleId, photo: photoAction.set });
+        else if (photoAction.remove) ps.delete(id);
+      };
+      if (rec.id != null) { ds.put(rec); apply(rec.id); }
+      else { const r = ds.add(rec); r.onsuccess = () => apply(r.result); }
+    });
+  },
   async deleteDocument(id) {
-    const store = await tx("documents", "readwrite");
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const t = db.transaction(["documents", "docphotos"], "readwrite");
+      t.oncomplete = () => resolve();
+      t.onerror = () => reject(t.error);
+      t.onabort = () => reject(t.error || new Error("Suppression annulée"));
+      t.objectStore("documents").delete(id);
+      t.objectStore("docphotos").delete(id);
+    });
+  },
+  async getDocPhoto(docId) {
+    const store = await tx("docphotos", "readonly");
+    return reqToPromise(store.get(docId));
+  },
+  async getDocPhotoIds() {
+    const store = await tx("docphotos", "readonly");
+    return reqToPromise(store.getAllKeys());
+  },
+  async getAllInspections() {
+    const store = await tx("inspections", "readonly");
+    return reqToPromise(store.getAll());
+  },
+  async getFuel(vehicleId) {
+    const store = await tx("fuel", "readonly");
+    return reqToPromise(store.index("vehicleId").getAll(vehicleId));
+  },
+  async getAllFuel() {
+    const store = await tx("fuel", "readonly");
+    return reqToPromise(store.getAll());
+  },
+  // Plein + mise à jour du kilométrage du véhicule (jamais à la baisse) : UNE transaction.
+  async saveFuel(rec, editing) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const t = db.transaction(["fuel", "vehicles"], "readwrite");
+      t.oncomplete = () => resolve();
+      t.onerror = () => reject(t.error);
+      t.onabort = () => reject(t.error || new Error("Enregistrement annulé"));
+      t.objectStore("fuel")[editing ? "put" : "add"](rec);
+      const vs = t.objectStore("vehicles");
+      const r = vs.get(rec.vehicleId);
+      r.onsuccess = () => { const v = r.result; if (v && rec.mileage > v.mileage) { v.mileage = rec.mileage; vs.put(v); } };
+    });
+  },
+  async deleteFuel(id) {
+    const store = await tx("fuel", "readwrite");
     return reqToPromise(store.delete(id));
   },
   async getInspections(vehicleId) {
@@ -204,13 +276,13 @@ const Data = {
   async deleteVehicle(id) {
     const db = await openDB();
     return new Promise((resolve, reject) => {
-      const t = db.transaction(["vehicles", "maintenances", "issues", "garages", "documents", "inspections"], "readwrite");
+      const t = db.transaction(["vehicles", "maintenances", "issues", "garages", "documents", "inspections", "fuel", "docphotos"], "readwrite");
       t.oncomplete = () => resolve();
       t.onerror = () => reject(t.error);
       t.onabort = () => reject(t.error || new Error("Suppression annulée"));
       t.objectStore("vehicles").delete(id);
       t.objectStore("garages").delete(id);
-      for (const name of ["maintenances", "issues", "documents", "inspections"]) {
+      for (const name of ["maintenances", "issues", "documents", "inspections", "fuel", "docphotos"]) {
         const store = t.objectStore(name);
         const req = store.index("vehicleId").getAllKeys(id);
         req.onsuccess = () => req.result.forEach((k) => store.delete(k));
@@ -319,7 +391,7 @@ async function openProfileModal() {
     <div class="field"><label for="pf-org">Organisation</label>
       <input id="pf-org" value="${esc(profile?.organisation || "")}" placeholder="Ex : Ministère de la Santé — SAMU Cotonou" /></div>
     <div class="field"><label for="pf-mgr">Responsable de flotte</label>
-      <input id="pf-mgr" value="${esc(profile?.manager || "")}" placeholder="Ex : Anania" /></div>
+      <input id="pf-mgr" value="${esc(profile?.manager || "")}" placeholder="Ex : Koffi Mensah" /></div>
     <button class="btn block" id="pf-save">Enregistrer</button>
     <button class="btn ghost block" id="pf-backup" style="margin-top:.6rem">💾 Sauvegarde des données</button>
   `);
@@ -379,7 +451,7 @@ async function renderDashboard(root) {
       ${shellHTML({
         title: "FleetCheck",
         subtitle: profile?.organisation || "Chaque véhicule compte. Chaque mission aussi.",
-        action: `<button class="header-action" id="btn-profile" aria-label="Profil">⚙️</button>`,
+        action: `<div style="display:flex;gap:.4rem"><button class="header-action" id="btn-direction" aria-label="Tableau de bord direction">📊</button><button class="header-action" id="btn-profile" aria-label="Profil">⚙️</button></div>`,
       })}
       <main class="main">
         ${FleetBackup.bannerHTML(vehicles.length)}
@@ -394,6 +466,7 @@ async function renderDashboard(root) {
     </div>
   `;
   qs("#btn-profile").addEventListener("click", openProfileModal);
+  qs("#btn-direction").addEventListener("click", () => { location.hash = "#/direction"; });
   qsa("[data-filter]", root).forEach((b) => b.addEventListener("click", () => { dashFilter = b.dataset.filter; render(); }));
   FleetBackup.bindBanner(root);
 }
@@ -573,9 +646,10 @@ function openDeleteModal(vehicle, nMaint, nIssues) {
 const garageEditing = new Set();
 
 async function renderVehicleDetail(root, id) {
-  const [vehicle, maintenances, issues, garage, documents, inspections] = await Promise.all([
-    Data.getVehicle(id), Data.getMaintenances(id), Data.getIssues(id), Data.getGarage(id), Data.getDocuments(id), Data.getInspections(id),
+  const [vehicle, maintenances, issues, garage, documents, inspections, fuelFills, photoKeys] = await Promise.all([
+    Data.getVehicle(id), Data.getMaintenances(id), Data.getIssues(id), Data.getGarage(id), Data.getDocuments(id), Data.getInspections(id), Data.getFuel(id), Data.getDocPhotoIds(),
   ]);
+  const photoIds = new Set(photoKeys);
 
   if (!vehicle) {
     root.innerHTML = `
@@ -659,7 +733,9 @@ async function renderVehicleDetail(root, id) {
 
         ${inspectionsSectionHTML(inspections)}
 
-        ${docsSectionHTML(documents)}
+        ${docsSectionHTML(documents, photoIds)}
+
+        ${costsSectionHTML(vehicle, maintenances, fuelFills)}
 
         <h3 class="section-title">Historique des entretiens</h3>
         ${maintHTML}
@@ -691,6 +767,7 @@ async function renderVehicleDetail(root, id) {
   }));
   qs('[data-action="intervals"]').addEventListener("click", () => openIntervalsModal(vehicle));
   bindDocs(vehicle, documents, root);
+  bindFuel(vehicle, fuelFills, maintenances, root);
   qs('[data-action="delete-vehicle"]').addEventListener("click", () => openDeleteModal(vehicle, maintenances.length, issues.length));
   const garageForm = qs("#form-garage");
   if (garageForm) {
@@ -839,7 +916,7 @@ async function renderMissionReport(root, vehicleId, respFromQuery) {
           <form class="form-card" id="form-mission-start">
             <p style="margin-top:0;color:var(--muted);font-size:0.9rem">Cette déclaration atteste l'état du véhicule à l'instant présent, avant un départ en mission.</p>
             <div class="field"><label for="ms-resp">Nom du responsable qui signe</label>
-              <input id="ms-resp" value="${esc(profile?.manager || "")}" placeholder="Ex : Anania" required /></div>
+              <input id="ms-resp" value="${esc(profile?.manager || "")}" placeholder="Ex : Koffi Mensah" required /></div>
             <button type="submit" class="btn block">Générer la déclaration</button>
           </form>
         </main>
@@ -937,6 +1014,10 @@ async function render() {
       renderNewIssue(root, Number(segments[1]));
     } else if (segments[0] === "inspection" && segments[1]) {
       await renderInspection(root, Number(segments[1]));
+    } else if (segments[0] === "direction") {
+      await renderDirection(root);
+    } else if (segments[0] === "rapport") {
+      await renderRapport(root, segments[1]);
     } else if (segments[0] === "echeances") {
       await renderEcheances(root);
     } else if (segments[0] === "mission" && segments[1]) {

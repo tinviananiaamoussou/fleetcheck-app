@@ -84,6 +84,8 @@ fleetcheck/
 ├── scoring.js          catégories de véhicules, seuils d'entretien, calcul du score
 ├── documents.js        documents administratifs et échéances
 ├── inspection.js       inspection avant départ (check-lists par catégorie)
+├── costs.js            carburant, consommation, coûts, dérives
+├── direction.js        tableau de bord direction et rapport imprimable
 ├── manifest.json      configuration de l'installation PWA
 ├── sw.js                 service worker (cache hors-ligne)
 └── icons/                 icônes de l'application
@@ -158,3 +160,53 @@ gyrophare pour un véhicule prioritaire).
 
 Base de données : passage de la version 1 à 2 (ajout des magasins `documents`
 et `inspections`), automatique et sans perte pour les données existantes.
+
+
+## Photo de document
+
+Chaque document administratif peut porter une photo (prise à l'appareil ou
+choisie dans la galerie), compressée en JPEG et stockée **à part** dans le
+magasin `docphotos` : les listes et le tableau de bord restent légers. Un tap
+sur la photo l'agrandit ; supprimer le document ou le véhicule supprime aussi
+la photo.
+
+## Carburant et coûts
+
+- **Pleins** (fiche véhicule → ⛽ Ajouter un plein) : date, litres, montant
+  FCFA, kilométrage, plein complet ou partiel, station. Le kilométrage du
+  véhicule suit (jamais à la baisse).
+- **Consommation** en L/100 km par la méthode « plein à plein » : seuls les
+  pleins *complets* ferment un intervalle, les pleins partiels intermédiaires
+  s'additionnent. Les valeurs hors 1–80 L/100 km sont isolées comme suspectes
+  et exclues des moyennes.
+- **Dérive** : la dernière consommation dépasse de plus de 25 % la moyenne des
+  intervalles précédents (au moins 3). C'est un **signal à vérifier** (fuite,
+  pneus, conduite, erreur de saisie), pas une preuve.
+- **Coûts** = entretiens (coût déjà saisi) + carburant, sur la période choisie
+  (ce mois, 90 jours, 12 mois). Le coût au km est estimé à partir des relevés
+  kilométriques de la période ; sans au moins deux relevés : « n/d ».
+
+## Tableau de bord direction et rapport
+
+Accessible par 📊 sur l'écran d'accueil (`#/direction`).
+
+Statut d'un véhicule, **calculé** et jamais saisi :
+
+- 🔴 **À traiter** : score < 60, ou anomalie critique ouverte, ou entretien
+  dépassé, ou document expiré.
+- 🟠 **À surveiller** : score 60–79, ou anomalie à surveiller ouverte, ou
+  entretien proche, ou document à renouveler (≤ 30 jours).
+- 🟢 **Opérationnel** : aucun des points ci-dessus.
+
+Le « taux d'opérationnels » est un **indicateur de conformité** calculé à
+partir des données saisies, pas une mesure de disponibilité réelle (qui
+demanderait de suivre les jours d'immobilisation).
+
+L'écran présente : indicateurs, véhicules à traiter en priorité (avec motifs),
+répartition par catégorie, anomalies / documents / inspections, coûts par
+période, consommations à vérifier. Le **rapport imprimable**
+(`#/rapport/mois|90j|12m`) reprend ces éléments avec signature du responsable ;
+« Imprimer / Enregistrer en PDF » utilise l'impression du navigateur.
+
+Base de données : version 3 (magasins `fuel` et `docphotos` ajoutés),
+migration automatique depuis les versions 1 et 2.

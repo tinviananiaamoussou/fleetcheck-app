@@ -80,7 +80,7 @@ function docsAlertHTML(docs) {
   return `<a class="notice doc-alert ${c.expire ? "expire" : ""}" href="#/echeances"><span>📄</span><span>Documents : ${parts.join(" · ")}. Touchez pour voir les échéances.</span></a>`;
 }
 
-function docsSectionHTML(docs) {
+function docsSectionHTML(docs, photoIds = new Set()) {
   const list = sortDocsByUrgency(docs);
   const body = list.length === 0
     ? `<p style="color:var(--muted);font-size:0.9rem">Aucun document suivi pour ce véhicule.</p>`
@@ -88,7 +88,7 @@ function docsSectionHTML(docs) {
         const st = documentStatus(d);
         return `<li class="history-item doc-item">
           <button type="button" class="doc-edit" data-action="edit-doc" data-id="${d.id}">
-            <div class="top"><span class="title">${esc(docName(d))}</span>${docChipHTML(st)}</div>
+            <div class="top"><span class="title">${esc(docName(d))}${photoIds.has(d.id) ? " 📎" : ""}</span>${docChipHTML(st)}</div>
             ${d.reference ? `<p class="meta">N° ${esc(d.reference)}</p>` : ""}
             ${d.holder ? `<p class="meta">Titulaire : ${esc(d.holder)}</p>` : ""}
           </button>
@@ -120,9 +120,13 @@ function docsReportHTML(docs) {
 
 /* ---------- Modale d'ajout / modification ---------- */
 
-function openDocModal(vehicle, doc) {
+async function openDocModal(vehicle, doc) {
   const editing = !!doc;
   const d = doc || {};
+  let photo = null, photoChanged = false;
+  if (editing) {
+    try { const r = await Data.getDocPhoto(d.id); photo = r ? r.photo : null; } catch { /* photo illisible : on continue sans */ }
+  }
   const o = openModal(`
     <h3>${editing ? "Modifier le document" : "Ajouter un document"}</h3>
     <div class="field"><label for="dc-type">Type de document</label>
@@ -132,11 +136,38 @@ function openDocModal(vehicle, doc) {
     <div class="field"><label for="dc-ref">Numéro / référence (facultatif)</label><input id="dc-ref" value="${esc(d.reference || "")}" /></div>
     <div class="field"><label for="dc-holder">Titulaire / chauffeur (facultatif)</label><input id="dc-holder" value="${esc(d.holder || "")}" placeholder="Utile pour un permis" /></div>
     <div class="field"><label for="dc-exp">Date d'expiration</label><input id="dc-exp" type="date" value="${esc(d.expiresAt || "")}" /></div>
+    <div class="field"><label>Photo du document (facultatif)</label>
+      <div id="dc-photo-box"></div>
+      <input type="file" id="dc-file" accept="image/*" hidden />
+      <div class="grid-2" style="margin-top:.4rem">
+        <button type="button" class="btn secondary" id="dc-pick">📷 Photographier / choisir</button>
+        <button type="button" class="btn ghost" id="dc-unpick" hidden>Retirer la photo</button>
+      </div>
+    </div>
     <button class="btn block" id="dc-save">${editing ? "Enregistrer" : "Ajouter"}</button>
     ${editing ? `<button class="btn ghost block danger-link" id="dc-del" style="margin-top:.6rem">🗑️ Supprimer ce document</button>` : ""}
   `);
   const sync = () => { qs("#dc-label-wrap", o).hidden = qs("#dc-type", o).value !== "Autre"; };
   qs("#dc-type", o).addEventListener("change", sync);
+
+  const paint = () => {
+    const box = qs("#dc-photo-box", o);
+    box.innerHTML = photo ? `<img class="doc-thumb" src="${photo}" alt="Photo du document" />` : "";
+    const img = qs("img", box);
+    if (img) img.addEventListener("click", () => openLightbox(img.src));
+    qs("#dc-unpick", o).hidden = !photo;
+    qs("#dc-pick", o).textContent = photo ? "📷 Remplacer" : "📷 Photographier / choisir";
+  };
+  paint();
+  qs("#dc-pick", o).addEventListener("click", () => qs("#dc-file", o).click());
+  qs("#dc-file", o).addEventListener("change", async (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    try { photo = await fileToCompressedDataUrl(f, 1400); photoChanged = true; paint(); }
+    catch (err) { toast("Photo illisible : " + err.message, true); }
+  });
+  qs("#dc-unpick", o).addEventListener("click", () => { photo = null; photoChanged = true; paint(); });
 
   qs("#dc-save", o).addEventListener("click", async () => {
     const type = qs("#dc-type", o).value;
@@ -150,9 +181,12 @@ function openDocModal(vehicle, doc) {
       reference: qs("#dc-ref", o).value.trim() || undefined,
       holder: qs("#dc-holder", o).value.trim() || undefined,
     };
-    if (editing) await Data.updateDocument(rec);
-    else { rec.createdAt = new Date().toISOString(); await Data.addDocument(rec); }
-    o.remove(); toast(editing ? "Document modifié" : "Document ajouté"); render();
+    if (!editing) rec.createdAt = new Date().toISOString();
+    const action = photoChanged ? (photo ? { set: photo } : { remove: true }) : null;
+    try {
+      await Data.saveDocument(rec, action);
+      o.remove(); toast(editing ? "Document modifié" : "Document ajouté"); render();
+    } catch (err) { toast("Enregistrement impossible : " + err.message, true); }
   });
 
   const del = qs("#dc-del", o);
