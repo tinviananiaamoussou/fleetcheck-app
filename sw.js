@@ -1,4 +1,4 @@
-const CACHE_NAME = "fleetcheck-v5";
+const CACHE_NAME = "fleetcheck-v6";
 const ASSETS = [
   "./",
   "./index.html",
@@ -10,6 +10,7 @@ const ASSETS = [
   "./inspection.js",
   "./costs.js",
   "./direction.js",
+  "./cloud.js",
   "./manifest.json",
   "./icon-192.png",
   "./icon-512.png",
@@ -32,6 +33,7 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+  if (new URL(event.request.url).origin !== self.location.origin) return; // jamais de cache pour Supabase
   event.respondWith(
     caches.match(event.request).then((cached) => {
       const fetchPromise = fetch(event.request)

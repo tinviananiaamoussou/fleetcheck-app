@@ -394,7 +394,9 @@ async function openProfileModal() {
       <input id="pf-mgr" value="${esc(profile?.manager || "")}" placeholder="Ex : Koffi Mensah" /></div>
     <button class="btn block" id="pf-save">Enregistrer</button>
     <button class="btn ghost block" id="pf-backup" style="margin-top:.6rem">💾 Sauvegarde des données</button>
+    <button class="btn ghost block" id="pf-cloud" style="margin-top:.6rem">☁️ Compte et synchronisation</button>
   `);
+  qs("#pf-cloud", overlay).addEventListener("click", () => { overlay.remove(); FleetCloud.openPanel(); });
   qs("#pf-backup", overlay).addEventListener("click", () => { overlay.remove(); FleetBackup.openPanel(); });
   qs("#pf-save", overlay).addEventListener("click", async () => {
     const org = qs("#pf-org", overlay).value.trim();

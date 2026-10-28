@@ -210,3 +210,22 @@ période, consommations à vérifier. Le **rapport imprimable**
 
 Base de données : version 3 (magasins `fuel` et `docphotos` ajoutés),
 migration automatique depuis les versions 1 et 2.
+
+---
+
+## Lot 6 — Comptes, rôles et synchronisation (Supabase)
+
+**Mise en place (une fois)** : créer un projet Supabase → *SQL Editor* → coller `supabase-lot6.sql` → *Run*. Puis copier l'URL du projet et la clé « anon » (*Project Settings → API*) en haut de `cloud.js` (`CFG`). Sans cela, l'app reste 100 % locale comme avant.
+
+**Utilisation** : ⚙️ → ☁️ *Compte et synchronisation*. Le premier gestionnaire crée un compte puis l'organisation ; il invite ensuite les autres membres par code (7 jours, usage unique). La synchro se fait au démarrage, au retour du réseau, au retour sur l'app, ou à la demande.
+
+| Rôle | Écrit | Lit |
+|---|---|---|
+| Gestionnaire | tout | tout |
+| Mécanicien | entretiens, anomalies | véhicules, entretiens, anomalies, documents, inspections, garages |
+| Chauffeur | inspections, anomalies, carburant | véhicules, anomalies, documents, inspections, garages, carburant |
+| Direction | rien | tout |
+
+**Règles de synchro** : un enregistrement modifié ou supprimé localement n'est jamais écrasé par le serveur (« le local gagne », sans horloge). Chaque membre a un *slot* ; ses nouveaux identifiants démarrent à slot × 1 000 000 000, donc pas de collision entre membres.
+
+**Limites connues** : (1) l'interface n'est pas encore adaptée au rôle (boutons visibles mais refusés par le serveur) ; (2) pas d'affectation chauffeur ↔ véhicule : un chauffeur voit tous les véhicules de l'organisation ; (3) le kilométrage mis à jour par une inspection de chauffeur/mécanicien reste local (le véhicule est réservé au gestionnaire) ; (4) deux appareils du même compte créant des données hors ligne en même temps peuvent entrer en collision d'id ; (5) un appareil déjà rempli ne peut pas rejoindre une autre organisation (sauvegarde puis appareil vide) ; (6) le SQL n'a pas été exécuté sur un vrai Postgres ici.
