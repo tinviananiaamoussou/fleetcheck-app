@@ -18,10 +18,31 @@ const FleetCloud = (() => {
     gestionnaire: STORES, direction: [],
     mecanicien: ["maintenances", "issues"], chauffeur: ["inspections", "issues", "fuel"],
   };
+  const NEED = { // éléments d'interface réservés à un magasin en écriture
+    vehicles: ['a[href^="#/nouveau"]', 'a[href^="#/modifier"]', '[data-action="delete-vehicle"]', '[data-action="intervals"]'],
+    maintenances: ['a[href^="#/entretien"]'], issues: ['a[href^="#/anomalie"]'], inspections: ['a[href^="#/inspection"]'],
+    documents: ['[data-action="add-doc"]', '[data-action="edit-doc"]'], fuel: ['[data-action="add-fuel"]', '[data-action="edit-fuel"]'],
+    garages: ['[data-action="edit-garage"]'],
+  };
+  const ROUTE = { nouveau: "vehicles", modifier: "vehicles", entretien: "maintenances", anomalie: "issues", inspection: "inspections" };
+  const MANAGERS = ["gestionnaire", "direction"]; // tableau de bord et rapports : données de toute la flotte
   const ROLES = { gestionnaire: "Gestionnaire", mecanicien: "Mécanicien", chauffeur: "Chauffeur", direction: "Direction" };
   let st = (() => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { return {}; } })();
   let busy = false;
   const save = () => localStorage.setItem(KEY, JSON.stringify(st));
+  const can = (store) => !st.role || (WRITE[st.role] || []).includes(store); // sans compte cloud : tout est permis
+  const routeAllowed = (seg) => !st.role || (ROUTE[seg] ? can(ROUTE[seg]) : !["direction", "rapport"].includes(seg) || MANAGERS.includes(st.role));
+  function applyRole() { // masque ce que le rôle ne peut pas faire (le serveur reste l'autorité)
+    const css = [];
+    if (st.role) {
+      for (const [s, sels] of Object.entries(NEED)) if (!can(s)) css.push(...sels);
+      if (st.role === "chauffeur" || !can("issues")) css.push('[data-action="resolve"]'); // seuls mécanicien/gestionnaire clôturent
+      if (!MANAGERS.includes(st.role)) css.push("#btn-direction");
+    }
+    let el = document.getElementById("fc-role-css");
+    if (!el) { el = document.createElement("style"); el.id = "fc-role-css"; document.head.appendChild(el); }
+    el.textContent = css.length ? css.join(",") + "{display:none!important}" : "";
+  }
   const configured = () => !!(CFG.url && CFG.anonKey);
   const p = (r) => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
   const done = (t) => new Promise((res, rej) => { t.oncomplete = res; t.onerror = t.onabort = () => rej(t.error); });
@@ -71,7 +92,7 @@ const FleetCloud = (() => {
     const r = await api(`/rest/v1/members?user_id=eq.${st.session.uid}&select=org_id,role,slot`);
     if (r.length) { await attach(r[0]); }
   }
-  async function signOut() { st = {}; save(); }
+  async function signOut() { st = {}; save(); applyRole(); }
 
   /* ---------- Organisation ---------- */
   async function isEmpty() {
@@ -110,7 +131,7 @@ const FleetCloud = (() => {
     if (!fresh && !(await isEmpty()) && localStorage.getItem(LAST) !== m.org_id)
       throw new Error("Cet appareil contient déjà des données locales d'une autre origine : enregistrez une sauvegarde puis utilisez un appareil/navigateur vide pour rejoindre cette organisation.");
     st.org = m.org_id; st.role = m.role; st.slot = m.slot; st.rev = 0; st.synced = {}; st.ids = {};
-    localStorage.setItem(LAST, m.org_id); save();
+    localStorage.setItem(LAST, m.org_id); save(); applyRole();
     const db = await openDb(); try { await refreshIds(db); } finally { db.close(); }
   }
   async function createOrg(name) { await attach((await api("/rest/v1/rpc/create_org", { method: "POST", body: { p_name: name } }))[0], true); }
@@ -237,5 +258,6 @@ const FleetCloud = (() => {
     run("#cl-out", async () => { await signOut(); again(); });
   }
 
-  return { openPanel, sync, signUp, signIn, createOrg, joinOrg, createInvite, signOut, state: () => st, SLOT_BASE };
+  applyRole();
+  return { can, routeAllowed, openPanel, sync, signUp, signIn, createOrg, joinOrg, createInvite, signOut, state: () => st, SLOT_BASE };
 })();

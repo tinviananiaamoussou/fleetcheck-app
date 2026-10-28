@@ -223,9 +223,11 @@ migration automatique depuis les versions 1 et 2.
 |---|---|---|
 | Gestionnaire | tout | tout |
 | Mécanicien | entretiens, anomalies | véhicules, entretiens, anomalies, documents, inspections, garages |
-| Chauffeur | inspections, anomalies, carburant | véhicules, anomalies, documents, inspections, garages, carburant |
+| Chauffeur | inspections, anomalies, carburant | véhicules, entretiens, anomalies, documents, inspections, garages, carburant |
 | Direction | rien | tout |
+
+**Interface par rôle** : sans compte cloud, tout reste visible. Connecté, les boutons d'écriture non autorisés sont masqués et les écrans interdits (nouveau véhicule, direction…) renvoient à l'accueil. Le tableau de bord Direction est réservé aux rôles Gestionnaire et Direction.
 
 **Règles de synchro** : un enregistrement modifié ou supprimé localement n'est jamais écrasé par le serveur (« le local gagne », sans horloge). Chaque membre a un *slot* ; ses nouveaux identifiants démarrent à slot × 1 000 000 000, donc pas de collision entre membres.
 
-**Limites connues** : (1) l'interface n'est pas encore adaptée au rôle (boutons visibles mais refusés par le serveur) ; (2) pas d'affectation chauffeur ↔ véhicule : un chauffeur voit tous les véhicules de l'organisation ; (3) le kilométrage mis à jour par une inspection de chauffeur/mécanicien reste local (le véhicule est réservé au gestionnaire) ; (4) deux appareils du même compte créant des données hors ligne en même temps peuvent entrer en collision d'id ; (5) un appareil déjà rempli ne peut pas rejoindre une autre organisation (sauvegarde puis appareil vide) ; (6) le SQL n'a pas été exécuté sur un vrai Postgres ici.
+**Limites connues** : (1) l'interface masque les actions interdites au rôle et refuse les écrans interdits, mais les montants des entretiens restent visibles pour le chauffeur (il lit les entretiens pour que l'état et le score des véhicules soient exacts) ; seul le chauffeur ne peut pas clôturer une anomalie côté interface, le serveur l'autorise ; (2) pas d'affectation chauffeur ↔ véhicule : un chauffeur voit tous les véhicules de l'organisation ; (3) le kilométrage mis à jour par une inspection de chauffeur/mécanicien reste local (le véhicule est réservé au gestionnaire) ; (4) deux appareils du même compte créant des données hors ligne en même temps peuvent entrer en collision d'id ; (5) un appareil déjà rempli ne peut pas rejoindre une autre organisation (sauvegarde puis appareil vide) ; (6) le SQL n'a pas été exécuté sur un vrai Postgres ici.

@@ -32,7 +32,7 @@ language sql stable security definer set search_path = public as $$
     when 'mecanicien'   then case when w then s in ('maintenances','issues')
                            else s in ('vehicles','maintenances','issues','documents','inspections','garages') end
     when 'chauffeur'    then case when w then s in ('inspections','issues','fuel')
-                           else s in ('vehicles','issues','documents','inspections','garages','fuel') end
+                           else s in ('vehicles','maintenances','issues','documents','inspections','garages','fuel') end
   end from members m where m.org_id = o and m.user_id = auth.uid() $$;
 
 create function create_org(p_name text) returns table(org_id uuid, role text, slot int)

@@ -998,6 +998,9 @@ function parseHash() {
 async function render() {
   const root = document.getElementById("app");
   const { segments, params } = parseHash();
+  if (typeof FleetCloud !== "undefined" && !FleetCloud.routeAllowed(segments[0])) {
+    toast("Action non autorisée pour votre rôle", true); location.hash = "#/"; return;
+  }
 
   try {
     if (segments.length === 0) {
